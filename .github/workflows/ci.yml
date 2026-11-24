@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+# ci.yml — runs the automated tests on every PR (and on main).
+#
+# The important part for the OKR: on a runtime-upgrade PR, the tests run on
+# BOTH the OLD runtime (the version on main) and the NEW runtime (the version
+# in the PR). They run inside AWS's official Lambda images, so the result
+# matches what would happen in real Lambda.
+#   Old runtime passes + new runtime fails  = the upgrade needs code fixes.
+#   Both pass                               = safe to approve and deploy to dev.
+# ---------------------------------------------------------------------------
+
+name: Tests (old and new runtime)
+
+# WHEN it runs: on every PR, on every push to main, and by button.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Tests only need to read the code.
+permissions:
+  contents: read
+
+jobs:
+  # JOB 1 — work out which runtime versions to test.
+  versions:
+    runs-on: ubuntu-latest
+    # Results handed to the next jobs.
+    outputs:
+      node: ${{ steps.pick.outputs.node }}
+      python: ${{ steps.pick.outputs.python }}
+    steps:
+      - name: Get the code (with history, so we can read main's versions)
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Pick the OLD (main) and NEW (this branch) versions
+        id: pick
+        env:
+          # The branch the PR goes into (usually main). Empty on a push, so default to main.
+          BASE: ${{ github.base_ref || 'main' }}
+        run: |
+          # NEW = the version written in this branch.
+          new_node=$(tr -d '[:space:]' < poc-node-app/.nvmrc)
+          new_py=$(tr -d '[:space:]' < poc-python-app/.python-version)
+          # OLD = the version written on the base branch (main).
+          old_node=$(git show "origin/$BASE:poc-node-app/.nvmrc" | tr -d '[:space:]')
+          old_py=$(git show "origin/$BASE:poc-python-app/.python-version" | tr -d '[:space:]')
+          echo "Node:   old=$old_node new=$new_node"
+          echo "Python: old=$old_py new=$new_py"
+          # Make a list of versions to test, without duplicates. When old and
+          # new are the same (normal package PRs), it has just one version.
+          echo "node=$(jq -cn --arg a "$old_node" --arg b "$new_node" '[$a,$b] | unique')" >> "$GITHUB_OUTPUT"
+          echo "python=$(jq -cn --arg a "$old_py" --arg b "$new_py" '[$a,$b] | unique')" >> "$GITHUB_OUTPUT"
+
+  # JOB 2 — Node app tests, once per version in the list.
+  node:
+    needs: versions
+    runs-on: ubuntu-latest
+    strategy:
+      # Run every version even if one fails, so you see both results.
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.versions.outputs.node) }}
+    name: Node tests on nodejs${{ matrix.version }}.x
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build the layer and run the tests inside the Lambda image
+        run: |
+          # docker run = start AWS's official Lambda Node image as a container.
+          #   --rm               delete the container afterwards
+          #   --entrypoint bash  run our commands instead of a Lambda function
+          #   -v ...:/app        share the poc-node-app folder into the container
+          #   -w /app            start inside that folder
+          # Inside: install the layer's packages FOR THIS Node version, then run the tests.
+          docker run --rm --entrypoint /bin/bash \
+            -v "$PWD/poc-node-app:/app" -w /app \
+            "public.ecr.aws/lambda/nodejs:${{ matrix.version }}" \
+            -c "node --version && cd layers/sass/nodejs && npm ci --omit=dev --no-audit --no-fund && cd /app && node --test test/*.test.js"
+
+  # JOB 3 — Python app tests, once per version in the list.
+  python:
+    needs: versions
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.versions.outputs.python) }}
+    name: Python tests on python${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build the layer and run the tests inside the Lambda image
+        run: |
+          # Same idea with AWS's official Lambda Python image.
+          # --only-binary=:all: = use ready-made packages only. If a package
+          # has none for this Python, fail fast with a clear message.
+          docker run --rm --entrypoint /bin/bash \
+            -v "$PWD/poc-python-app:/app" -w /app \
+            "public.ecr.aws/lambda/python:${{ matrix.version }}" \
+            -c "python3 --version && pip install --quiet --only-binary=:all: --target layers/data/python -r layers/data/requirements.txt && python3 -m unittest discover -s tests -v"

@@ -1,0 +1,7 @@
+[
+  {
+    "Source": "runtime-upgrade.test",
+    "DetailType": "AWS Health Event",
+    "Detail": "{\"service\":\"LAMBDA\",\"eventTypeCode\":\"AWS_LAMBDA_PLANNED_LIFECYCLE_EVENT\",\"eventTypeCategory\":\"scheduledChange\",\"eventRegion\":\"ap-south-1\",\"startTime\":\"TEST - not a real AWS notice\"}"
+  }
+]

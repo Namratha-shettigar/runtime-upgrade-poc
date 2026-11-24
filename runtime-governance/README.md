@@ -10,6 +10,8 @@ This folder switches on **AWS's own tools** so they find and report Lambda funct
 | `02-runtime-rules.yml` | **Config managed rule** + **saved queries** | Old-runtime functions show as **NON_COMPLIANT** (red), and you get an inventory list. |
 | `03-health-alerts.yml` | **AWS Health → EventBridge → SNS** | An **email** when AWS announces that a Lambda runtime is retiring. |
 | `04-security-hub.yml` *(optional)* | **Security Hub, control Lambda.2** | A ready-made dashboard. AWS keeps its runtime list up to date. Costs money after a 30-day free trial. |
+| `05-github-trigger.yml` *(Step 3)* | **EventBridge API destination** | The retirement notice **starts the Renovate runtime upgrade on GitHub**. Deploy steps are in the main README, under "Step 3". |
+| `test-events/github-trigger-test.json` | | A *test* notice you can send yourself with `aws events put-events` to try the GitHub trigger. |
 | `scripts/check.sh` | (read-only AWS CLI) | Checks that everything works. **Changes nothing.** |
 | `test-events/lambda-deprecation-event.json` | | A *sample* AWS Health event used for a dry-run test. |
 

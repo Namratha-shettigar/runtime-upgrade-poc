@@ -1,0 +1,94 @@
+// ---------------------------------------------------------------------------
+// renovate.json5 — the rules Renovate follows in this repo.
+// (".json5" = JSON that allows comments like these.)
+//
+// TWO KINDS OF UPDATES (decided by the workflow .github/workflows/renovate.yml):
+//   1. "packages" mode, every Monday: small PRs for package updates.
+//   2. "runtime" mode, when AWS announces a runtime retirement (or by hand):
+//      one PR per app that moves the runtime to the latest Lambda version.
+// Nothing is ever merged automatically: a person reviews and approves.
+// ---------------------------------------------------------------------------
+{
+  // Lets editors check this file for typos (optional, harmless).
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+
+  // Start from Renovate's official "best practices" settings.
+  extends: ['config:best-practices'],
+
+  // Times in this file (and PR timestamps) use Indian time.
+  timezone: 'Asia/Kolkata',
+
+  // Wait 3 days after a new version is published before proposing it.
+  // Brand-new releases are where bugs and hacked packages tend to appear.
+  minimumReleaseAge: '3 days',
+
+  // At most 5 Renovate PRs open at once, so reviewers aren't flooded.
+  prConcurrentLimit: 5,
+  // No per-hour limit, so one run can open everything it needs to.
+  prHourlyLimit: 0,
+
+  // NEVER merge by itself: review-and-approve is the whole point.
+  automerge: false,
+
+  // Every Renovate PR gets this label, so they're easy to filter.
+  labels: ['dependencies'],
+
+  // Turn off Renovate's "Dependency Dashboard" issue. We run in two modes,
+  // and the dashboard would keep switching between them, which is confusing.
+  dependencyDashboard: {
+    enabled: false,
+  },
+
+  // Rules for specific kinds of updates. Later rules win if two rules match.
+  packageRules: [
+    {
+      // RULE 1 — Node runtime (the ".nvmrc" file, read by Renovate's "nvm" manager).
+      description: 'Lambda Node.js runtime upgrade',
+      matchManagers: ['nvm'],
+      // Name of the PR / branch.
+      groupName: 'Lambda Node.js runtime',
+      // Only go up to the newest runtime that AWS Lambda supports.
+      // When AWS adds a newer one (e.g. Node 28), change 26 -> 28 here.
+      allowedVersions: '<=26',
+      labels: ['runtime-upgrade'],
+      // The reviewer checklist, added to the PR description.
+      prBodyNotes: [
+        '### Reviewer checklist (Node runtime upgrade)\n- [ ] CI job **Node tests** passed on the NEW version (red on the new version = something needs fixing)\n- [ ] Read the breaking changes: https://github.com/nodejs/node/tree/main/doc/changelogs\n- [ ] Native packages in `poc-node-app/layers/` work on the new version (e.g. replace `node-sass` with `sass`)\n- [ ] Update `engines.node` in `poc-node-app/package.json`\n- [ ] Rebuild the layer (`npm run build:layer`), deploy to **dev**, invoke every function\n- [ ] Then deploy to prod; AWS Config rule `lambda-supported-runtimes` turns COMPLIANT',
+      ],
+    },
+    {
+      // RULE 2 — Python runtime (the ".python-version" file, "pyenv" manager).
+      description: 'Lambda Python runtime upgrade',
+      matchManagers: ['pyenv'],
+      groupName: 'Lambda Python runtime',
+      // Newest Python that AWS Lambda supports. Change when AWS adds a newer one.
+      allowedVersions: '<=3.15',
+      labels: ['runtime-upgrade'],
+      prBodyNotes: [
+        "### Reviewer checklist (Python runtime upgrade)\n- [ ] CI job **Python tests** passed on the NEW version\n- [ ] Read the breaking changes: https://docs.python.org/3/whatsnew/\n- [ ] Layer packages in `poc-python-app/layers/data/requirements.txt` have versions for the new Python\n- [ ] Rebuild the layer (`bash scripts/build-layer.sh`), deploy to **dev**, invoke every function\n- [ ] Then deploy to prod; AWS Config rule `lambda-supported-runtimes` turns COMPLIANT",
+      ],
+    },
+    {
+      // RULE 3 — "engines.node" in package.json is also a Node version.
+      // We don't let Renovate change it in weekly package PRs; the developer
+      // updates it as part of the runtime upgrade (see the checklist above).
+      description: 'Leave engines.node to the runtime upgrade',
+      matchDepTypes: ['engines'],
+      enabled: false,
+    },
+    {
+      // RULE 4 — packages inside the Node Lambda layer: one PR together.
+      description: 'Node layer packages',
+      matchFileNames: ['poc-node-app/layers/**'],
+      groupName: 'Node Lambda layer packages',
+      labels: ['lambda-layer'],
+    },
+    {
+      // RULE 5 — packages inside the Python Lambda layer: one PR together.
+      description: 'Python layer packages',
+      matchFileNames: ['poc-python-app/layers/**'],
+      groupName: 'Python Lambda layer packages',
+      labels: ['lambda-layer'],
+    },
+  ],
+}

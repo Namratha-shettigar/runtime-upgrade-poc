@@ -1,0 +1,124 @@
+# ---------------------------------------------------------------------------
+# 05-github-trigger.yml — when AWS Health announces a Lambda runtime
+# retirement, START the runtime upgrade on GitHub automatically.
+#
+# Flow:  AWS Health -> EventBridge rule -> API destination -> GitHub API
+#        -> "repository_dispatch" message -> Renovate workflow (runtime mode)
+#        -> runtime-upgrade PR
+#
+# All built-in AWS features (EventBridge "API destinations"); no code to run.
+# Deploy in the same region as your Lambda functions (ap-south-1).
+#
+# You need a GitHub token for this (see README "Step 3 setup", token #2).
+# It is stored by AWS in Secrets Manager (about $0.40 per month).
+# ---------------------------------------------------------------------------
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Runtime governance POC - AWS Health Lambda notice starts the Renovate runtime upgrade on GitHub
+
+Parameters:
+  # Which GitHub repo to send the message to, written "owner/name".
+  GitHubRepository:
+    Type: String
+    Default: Namratha-shettigar/runtime-upgrade-poc
+    Description: GitHub repository (owner/name) whose Renovate workflow should start
+  # The GitHub token. NoEcho = never shown in the console or command output.
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Description: Fine-grained GitHub token with "Contents - Read and write" on the repository
+
+Resources:
+  # 1) Connection = HOW to log in to GitHub. AWS keeps the token safely in
+  #    Secrets Manager and adds it to every request as a header.
+  GitHubConnection:
+    Type: AWS::Events::Connection
+    Properties:
+      Name: github-runtime-upgrade
+      Description: Login details for the GitHub API
+      # "API key" here means "send a fixed header with every request".
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          # GitHub expects:  Authorization: Bearer <token>
+          ApiKeyName: Authorization
+          ApiKeyValue: !Sub 'Bearer ${GitHubToken}'
+        # Extra headers GitHub's API asks for.
+        InvocationHttpParameters:
+          HeaderParameters:
+            - Key: Accept
+              Value: application/vnd.github+json
+            - Key: X-GitHub-Api-Version
+              Value: '2022-11-28'
+
+  # 2) API destination = WHERE to send it: GitHub's "dispatches" address for
+  #    our repo. A POST there starts any workflow listening for
+  #    "repository_dispatch".
+  GitHubDispatchDestination:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: github-repository-dispatch
+      ConnectionArn: !GetAtt GitHubConnection.Arn
+      InvocationEndpoint: !Sub 'https://api.github.com/repos/${GitHubRepository}/dispatches'
+      HttpMethod: POST
+      # At most 1 call per second (we only need one per notice).
+      InvocationRateLimitPerSecond: 1
+
+  # 3) Permission for EventBridge to use that destination.
+  InvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # Only the EventBridge service may use this role.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-github-destination
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Allowed to call ONLY our GitHub destination, nothing else.
+              - Effect: Allow
+                Action: events:InvokeApiDestination
+                Resource: !GetAtt GitHubDispatchDestination.Arn
+
+  # 4) The rule: IF a Lambda notice arrives, THEN call GitHub.
+  StartUpgradeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: lambda-runtime-deprecation-start-upgrade
+      Description: AWS Health Lambda notice -> start Renovate runtime upgrade on GitHub
+      EventPattern:
+        # Real notices come from "aws.health". "runtime-upgrade.test" lets you
+        # send a TEST notice yourself (AWS doesn't allow faking aws.health).
+        source: [aws.health, runtime-upgrade.test]
+        detail-type: [AWS Health Event]
+        detail:
+          service: [LAMBDA]
+          eventTypeCategory: [scheduledChange, accountNotification]
+      State: ENABLED
+      Targets:
+        - Id: github-dispatch
+          Arn: !GetAtt GitHubDispatchDestination.Arn
+          RoleArn: !GetAtt InvokeRole.Arn
+          # Build the message GitHub expects:
+          #   event_type     = the name our workflow listens for
+          #   client_payload = extra details, shown in the workflow run
+          InputTransformer:
+            InputPathsMap:
+              type: $.detail.eventTypeCode
+              region: $.detail.eventRegion
+              start: $.detail.startTime
+              source: $.source
+            InputTemplate: >-
+              {"event_type": "lambda-runtime-deprecation",
+              "client_payload": {"eventTypeCode": "<type>", "region": "<region>",
+              "startTime": "<start>", "source": "<source>"}}
+
+Outputs:
+  RuleName:
+    Description: EventBridge rule that starts the GitHub runtime upgrade
+    Value: !Ref StartUpgradeRule

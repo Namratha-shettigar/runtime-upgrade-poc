@@ -1,0 +1,97 @@
+# ---------------------------------------------------------------------------
+# renovate.yml — runs Renovate, which reads renovate.json5 and opens upgrade PRs.
+#
+# It starts in 3 ways:
+#   1. Every Monday             -> "packages" mode (normal package updates)
+#   2. A button in GitHub       -> you choose "packages" or "runtime"
+#      (Actions tab -> Renovate -> Run workflow)
+#   3. A message from AWS       -> "runtime" mode. AWS EventBridge sends it when
+#      AWS Health announces a Lambda runtime retirement
+#      (runtime-governance/05-github-trigger.yml).
+#
+# Needs one secret: RENOVATE_TOKEN (see README "Step 3 setup").
+# ---------------------------------------------------------------------------
+
+# The name shown in the GitHub "Actions" tab.
+name: Renovate
+
+# WHEN this workflow runs.
+on:
+  # 1) On a timer. "cron" format: minute hour day month weekday, in UTC.
+  #    02:30 UTC on Monday (weekday 1) = 08:00 Monday in India.
+  schedule:
+    - cron: '30 2 * * 1'
+  # 2) The "Run workflow" button, with a drop-down to choose the mode.
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'packages = normal package updates, runtime = Lambda runtime upgrade'
+        type: choice
+        options: [packages, runtime]
+        default: packages
+  # 3) A message sent to GitHub's API (by AWS) with this exact name.
+  repository_dispatch:
+    types: [lambda-runtime-deprecation]
+
+# The built-in GitHub token only needs to read. Renovate uses its own token
+# (RENOVATE_TOKEN) to create branches and PRs.
+permissions:
+  contents: read
+
+# Never run two Renovate jobs at the same time; the second one waits.
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    # A fresh Linux computer from GitHub for each run.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide the mode (packages or runtime)
+        # Values from GitHub, handed to the script as variables.
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+        run: |
+          # A message from AWS always means "runtime".
+          if [ "$EVENT" = "repository_dispatch" ]; then
+            MODE=runtime
+          # The button: use whatever was chosen in the drop-down.
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            MODE="$INPUT_MODE"
+          # The Monday timer: packages.
+          else
+            MODE=packages
+          fi
+          echo "Renovate mode: $MODE"
+
+          if [ "$MODE" = "packages" ]; then
+            # Only these "managers" (file types) are looked at, so the runtime
+            # files (.nvmrc, .python-version) are left alone:
+            #   npm = package.json, pip_requirements = requirements.txt,
+            #   github-actions = the workflow files in .github/workflows.
+            echo 'RENOVATE_ENABLED_MANAGERS=["npm","pip_requirements","github-actions"]' >> "$GITHUB_ENV"
+            # Don't close the runtime-upgrade PR just because this run
+            # didn't look at runtime files.
+            echo 'RENOVATE_PRUNE_STALE_BRANCHES=false' >> "$GITHUB_ENV"
+          fi
+          # In "runtime" mode we add nothing: Renovate looks at everything,
+          # including the runtime files, so the runtime PR gets created.
+
+      - name: Run Renovate
+        # Renovate's official GitHub Action (exact version pinned).
+        uses: renovatebot/github-action@v46.3.15
+        with:
+          # Fine-grained personal access token saved as a repository secret.
+          token: ${{ secrets.RENOVATE_TOKEN }}
+          # Exact Renovate version, so runs are repeatable.
+          renovate-version: 44.259.1
+        env:
+          # Which repo to work on: this one ("owner/name").
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_PLATFORM: github
+          # The repo already has renovate.json5, so skip the "onboarding" PR.
+          RENOVATE_ONBOARDING: 'false'
+          # How much detail to print in the run log.
+          LOG_LEVEL: info

@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# 04-security-hub.yml — OPTIONAL. Turns on AWS Security Hub with the
+# "AWS Foundational Security Best Practices" standard. One of its ready-made
+# checks, control Lambda.2 ("Lambda functions should use supported runtimes"),
+# gives us a runtime dashboard maintained by AWS itself: AWS keeps its list
+# of supported runtimes up to date, so we don't have to.
+#
+# Before deploying:
+#   - SKIP if Security Hub is already on (check: aws securityhub describe-hub).
+#   - Needs AWS Config ON (file 01), because Security Hub's checks use Config.
+#   - COST: free for the first 30 days, then charged per check. The standard
+#     runs many checks (not only Lambda). For a short POC, turn it off after:
+#     delete this stack.
+# ---------------------------------------------------------------------------
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Runtime governance POC - Security Hub with AWS Foundational Security Best Practices (control Lambda.2)
+
+Resources:
+  # 1) Switch Security Hub on in this region.
+  Hub:
+    Type: AWS::SecurityHub::Hub
+    Properties:
+      # Don't auto-enable every default standard; we choose just one below.
+      EnableDefaultStandards: false
+      # Each check gets one result across all standards (simpler to read).
+      ControlFindingGenerator: SECURITY_CONTROL
+
+  # 2) Enable ONE standard: AWS Foundational Security Best Practices v1.0.0.
+  #    It contains control Lambda.2 (supported runtimes).
+  FoundationalStandard:
+    Type: AWS::SecurityHub::Standard
+    # Security Hub must be on before a standard can be enabled.
+    DependsOn: Hub
+    Properties:
+      StandardsArn: !Sub 'arn:aws:securityhub:${AWS::Region}::standards/aws-foundational-security-best-practices/v/1.0.0'

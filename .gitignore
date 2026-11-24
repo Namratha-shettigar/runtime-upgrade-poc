@@ -1,0 +1,16 @@
+# Files git should never store. Each line is a pattern; "/" at the end = a folder.
+
+# Downloaded Node packages (re-created by "npm install").
+node_modules/
+# Serverless Framework's build output (re-created on every deploy).
+.serverless/
+# The built Python layer, ~150 MB (re-created by scripts/build-layer.sh).
+poc-python-app/layers/data/python/
+# Python's automatic cache files.
+__pycache__/
+# Zip files produced by builds.
+*.zip
+# Secret files: never put keys or passwords in git.
+.env
+.env.*
+*.pem

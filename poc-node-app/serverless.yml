@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# serverless.yml — the "recipe" that tells Serverless Framework what to create
+# in AWS when you run `serverless deploy`.
+# ---------------------------------------------------------------------------
+
+# The project name. Every AWS resource created gets this as a prefix,
+# so you can find them easily in the AWS console.
+service: poc-node-app
+
+# Which version of Serverless Framework this file is written for (v3).
+frameworkVersion: '3'
+
+provider:
+  # We deploy to AWS (Serverless also supports other clouds).
+  name: aws
+  # The Lambda runtime. It is NOT typed here directly; it is read from
+  # runtime.js, which reads .nvmrc. Result today: "nodejs18.x".
+  runtime: ${file(./runtime.js):runtime}
+  # The AWS region. Change with: serverless deploy --region ap-south-1
+  region: ${opt:region, 'ap-south-1'}
+  # The "stage" is the environment: dev or prod. Default is dev.
+  stage: ${opt:stage, 'dev'}
+  # Memory per function (MB) and maximum run time (seconds). Kept small for the POC.
+  memorySize: 256
+  timeout: 10
+  # Tags are labels put on every resource. They help us find all POC
+  # resources and their runtime later, e.g. in AWS Config.
+  tags:
+    project: runtime-upgrade-poc
+    owner: namratha
+
+# Lambda layers: a "layer" is a zip of shared libraries that functions can use.
+# Here the layer holds node-sass, a NATIVE package (compiled machine code),
+# which is exactly the kind of thing that breaks during runtime upgrades.
+layers:
+  sass:
+    # The folder that gets zipped into the layer.
+    # (You must run scripts/build-layer.sh first to fill it.)
+    path: layers/sass
+    # A label shown in the AWS console.
+    description: node-sass compiled for the Node version in .nvmrc
+    # Which runtimes this layer says it supports — also read from .nvmrc.
+    compatibleRuntimes:
+      - ${file(./runtime.js):runtime}
+
+# Files we do NOT want to upload with the functions (keeps the zip small).
+package:
+  patterns:
+    - '!layers/**'
+    - '!scripts/**'
+    - '!test/**'
+
+functions:
+  # Function 1: uses util.isArray / util.isDate (removed in Node 23+).
+  checkInput:
+    # Format is "file path without .js" + "." + "exported function name".
+    handler: src/checkInput.handler
+
+  # Function 2: uses node-sass from the layer (native, Node-18-only binary).
+  renderCss:
+    handler: src/renderCss.handler
+    layers:
+      # "SassLambdaLayer" is the name Serverless gives the layer defined above
+      # (layer name with first letter capital + "LambdaLayer").
+      - !Ref SassLambdaLayer
+
+  # Function 3: uses aws-sdk v2 (end of support; should move to SDK v3).
+  whoAmI:
+    handler: src/whoAmI.handler

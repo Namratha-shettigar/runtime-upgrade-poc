@@ -1,0 +1,6 @@
+# The built layer is re-created by scripts/build-layer.sh, so it isn't stored in git.
+layers/data/python/
+# Python's cache files, created automatically when code runs.
+__pycache__/
+# Serverless's build output folder.
+.serverless/

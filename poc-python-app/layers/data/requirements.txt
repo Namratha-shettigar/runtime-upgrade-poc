@@ -1,0 +1,5 @@
+# Packages that go into the Lambda layer. "==" pins an exact version.
+# These are the LAST versions that still support Python 3.8, so the layer is
+# locked to 3.8. Renovate will propose upgrades to these lines.
+numpy==1.24.4
+pandas==2.0.3

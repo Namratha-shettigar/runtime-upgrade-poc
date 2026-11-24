@@ -1,0 +1,35 @@
+{
+  "version": "0",
+  "id": "7bf73129-1428-4cd3-a780-95db273d1602",
+  "detail-type": "AWS Health Event",
+  "source": "aws.health",
+  "account": "123456789012",
+  "time": "2026-10-20T10:00:00Z",
+  "region": "ap-south-1",
+  "resources": ["arn:aws:lambda:ap-south-1:123456789012:function:poc-node-app-dev-checkInput"],
+  "detail": {
+    "eventArn": "arn:aws:health:ap-south-1::event/LAMBDA/AWS_LAMBDA_PLANNED_LIFECYCLE_EVENT/example",
+    "service": "LAMBDA",
+    "eventTypeCode": "AWS_LAMBDA_PLANNED_LIFECYCLE_EVENT",
+    "eventTypeCategory": "scheduledChange",
+    "eventScopeCode": "ACCOUNT_SPECIFIC",
+    "communicationId": "example-1",
+    "startTime": "Thu, 30 Apr 2027 00:00:00 GMT",
+    "lastUpdatedTime": "Tue, 20 Oct 2026 10:00:00 GMT",
+    "statusCode": "upcoming",
+    "eventRegion": "ap-south-1",
+    "eventDescription": [{
+      "language": "en_US",
+      "latestDescription": "EXAMPLE: Lambda support for Node.js 22 is ending on April 30, 2027."
+    }],
+    "affectedEntities": [{
+      "entityValue": "arn:aws:lambda:ap-south-1:123456789012:function:poc-node-app-dev-checkInput",
+      "status": "PENDING"
+    }],
+    "affectedAccount": "123456789012",
+    "page": "1",
+    "totalPages": "1",
+    "backupEvent": "false",
+    "actionability": "ACTION_REQUIRED"
+  }
+}

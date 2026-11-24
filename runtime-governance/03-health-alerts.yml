@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+# 03-health-alerts.yml — when AWS posts a Lambda notice in AWS Health
+# (e.g. "Node.js 18 support is ending, these functions are affected"),
+# send an email straight away.
+#
+# Flow:  AWS Health  ->  EventBridge rule  ->  SNS topic  ->  your email
+# Later (Step 3) a second target on the same rule will start the Renovate
+# pipeline in Azure DevOps.
+#
+# Deploy this in the SAME region as your Lambda functions: AWS Health sends
+# the notice to the region where the affected functions are.
+# ---------------------------------------------------------------------------
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Runtime governance POC - email alert for AWS Health Lambda notices (runtime deprecation)
+
+Parameters:
+  # Where the alert emails go. You must click "Confirm subscription" in the
+  # first email AWS sends, or no alerts will arrive.
+  AlertEmail:
+    Type: String
+    Description: Email address that receives Lambda runtime deprecation alerts
+
+Resources:
+  # 1) SNS topic = a "notice board". Anything posted to it is sent to every
+  #    subscriber (here: one email address).
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: lambda-runtime-alerts
+      DisplayName: Lambda runtime alerts
+
+  # 2) The email subscriber.
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # 3) Permission for EventBridge to post messages on the topic.
+  AlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref AlertTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref AlertTopic
+
+  # 4) The EventBridge rule = "IF an event looks like this, THEN do that".
+  DeprecationRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: lambda-runtime-deprecation-alert
+      Description: AWS Health notices about Lambda (runtime deprecation and other scheduled changes)
+      # The "IF" part: only events that match ALL of these fields.
+      EventPattern:
+        # Comes from AWS Health ...
+        source: [aws.health]
+        detail-type: [AWS Health Event]
+        detail:
+          # ... is about the Lambda service ...
+          service: [LAMBDA]
+          # ... and is a planned change or an account notice. Runtime
+          # retirements arrive as AWS_LAMBDA_PLANNED_LIFECYCLE_EVENT in the
+          # "scheduledChange" category. We also accept "accountNotification"
+          # so we don't miss a notice that AWS files differently.
+          eventTypeCategory: [scheduledChange, accountNotification]
+      State: ENABLED
+      # The "THEN" part: where matching events are sent.
+      Targets:
+        - Id: email-alert
+          Arn: !Ref AlertTopic
+          # Turn the raw event (long JSON) into a short, readable email.
+          InputTransformer:
+            # Pick fields out of the event and give them short names.
+            InputPathsMap:
+              type: $.detail.eventTypeCode
+              region: $.detail.eventRegion
+              start: $.detail.startTime
+              account: $.account
+              description: $.detail.eventDescription[0].latestDescription
+            # The email text; <name> is replaced with the value picked above.
+            InputTemplate: |
+              "AWS Health notice for Lambda in account <account> (<region>)."
+              "Type: <type>"
+              "Date: <start>"
+              "Affected functions: see the Affected resources tab of this notice in the AWS Health Dashboard."
+              "Action: start the runtime upgrade now (Renovate pipeline), and check the Config rule lambda-supported-runtimes."
+              "Details from AWS: <description>"
+
+Outputs:
+  TopicArn:
+    Description: SNS topic that receives the alerts (Step 3 adds the Azure DevOps trigger)
+    Value: !Ref AlertTopic
+  RuleName:
+    Description: EventBridge rule name
+    Value: !Ref DeprecationRule

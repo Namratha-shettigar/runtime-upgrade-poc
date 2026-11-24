@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# serverless.yml — the "recipe" Serverless Framework follows when you run
+# `serverless deploy`: what to create in AWS and how.
+# ---------------------------------------------------------------------------
+
+# Project name; used as a prefix on every AWS resource so they're easy to find.
+service: poc-python-app
+
+# This file is written for Serverless Framework v3.
+frameworkVersion: '3'
+
+provider:
+  # Deploy to AWS.
+  name: aws
+  # The Lambda runtime, read from runtime.js, which reads .python-version.
+  # Result today: "python3.8".
+  runtime: ${file(./runtime.js):runtime}
+  # AWS region (default Mumbai). Override with --region.
+  region: ${opt:region, 'ap-south-1'}
+  # Environment name: dev (default) or prod. Override with --stage.
+  stage: ${opt:stage, 'dev'}
+  # Memory per function in MB. pandas needs a bit more than tiny scripts.
+  memorySize: 512
+  # Maximum seconds a function may run before Lambda stops it.
+  timeout: 15
+  # Labels on every resource so we can find all POC resources later.
+  tags:
+    project: runtime-upgrade-poc
+    owner: namratha
+
+# The layer: a zip of shared libraries. This one holds numpy and pandas,
+# which contain machine code compiled for ONE Python version (3.8 here).
+layers:
+  data:
+    # Folder that becomes the layer. Fill it first with scripts/build-layer.sh.
+    path: layers/data
+    # Label shown in the AWS console.
+    description: numpy + pandas built for the Python version in .python-version
+    # The runtimes this layer says it supports — also from .python-version.
+    compatibleRuntimes:
+      - ${file(./runtime.js):runtime}
+
+# Files NOT uploaded with the functions (keeps the upload small).
+# The layer is uploaded separately, so we exclude it here.
+package:
+  patterns:
+    - '!layers/**'
+    - '!scripts/**'
+    - '!tests/**'
+    - '!runtime.js'
+    - '!README.md'
+    - '!**/__pycache__/**'
+
+functions:
+  # Function 1: pandas/numpy from the layer (Python-3.8-only binaries).
+  report:
+    # Format: "file path without .py" + "." + "function name inside the file".
+    handler: src/report.handler
+    layers:
+      # Serverless names the layer above "DataLambdaLayer"
+      # (layer name with a capital first letter + "LambdaLayer").
+      - !Ref DataLambdaLayer
+
+  # Function 2: uses the "imp" module (removed in Python 3.12).
+  loadPlugin:
+    handler: src/plugin_loader.handler
+
+  # Function 3: uses "distutils" (removed in 3.12) and datetime.utcnow() (deprecated).
+  versionCheck:
+    handler: src/version_check.handler

@@ -1,0 +1,16 @@
+{
+  "name": "poc-node-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "POC app on nodejs18.x with packages that break on newer Node",
+  "engines": {
+    "node": ">=18 <19"
+  },
+  "scripts": {
+    "build:layer": "bash scripts/build-layer.sh",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "aws-sdk": "2.1692.0"
+  }
+}

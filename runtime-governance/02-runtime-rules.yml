@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# 02-runtime-rules.yml — uses AWS Config (switched on by file 01) to:
+#   1. mark every Lambda function on an old runtime as NON_COMPLIANT (red), and
+#   2. save ready-made "inventory" queries: which function uses which runtime.
+# Needs AWS Config recording to be ON in this region first.
+# ---------------------------------------------------------------------------
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Runtime governance POC - Config rule for supported Lambda runtimes + inventory queries
+
+Parameters:
+  # The list of runtimes we consider "OK". Anything else turns red.
+  # Default = runtimes that AWS still supports and that are not retiring
+  # within the next few months (from the AWS Lambda runtimes page, Nov 2026).
+  # nodejs26.x and python3.15 became generally available in Nov 2026.
+  # python3.10 is left out: AWS retired it on Oct 31, 2026.
+  # Update this list when AWS announces a new retirement or a new runtime.
+  AllowedRuntimes:
+    Type: String
+    Default: nodejs26.x,nodejs24.x,nodejs22.x,python3.15,python3.14,python3.13,python3.12,python3.11
+    Description: Comma-separated list of Lambda runtimes that count as supported
+
+Resources:
+  # 1) The rule. It is an AWS "managed rule": AWS wrote and maintains the logic,
+  #    we only give it our list of allowed runtimes. No code of our own.
+  SupportedRuntimeRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      # The name you'll see in the AWS Config console.
+      ConfigRuleName: lambda-supported-runtimes
+      Description: Lambda functions must use a runtime from the allowed list
+      # Only look at Lambda functions.
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::Lambda::Function
+      Source:
+        # "AWS" = a managed rule written by AWS.
+        Owner: AWS
+        # The ID of AWS's built-in rule that checks Lambda settings.
+        SourceIdentifier: LAMBDA_FUNCTION_SETTINGS_CHECK
+      # The rule's settings: we only check the runtime (not memory, timeout or role).
+      InputParameters:
+        runtime: !Ref AllowedRuntimes
+
+  # 2) Saved query: list of every Lambda function with its runtime.
+  #    Open it in AWS Config > Advanced queries > Saved queries.
+  InventoryQuery:
+    Type: AWS::Config::StoredQuery
+    Properties:
+      QueryName: lambda-runtime-inventory
+      QueryDescription: Every Lambda function with its runtime, package type and tags
+      # SQL-like question for AWS Config. Read it as:
+      # "show name, runtime, package type, region, account and tags
+      #  of every resource whose type is Lambda function".
+      QueryExpression: >-
+        SELECT resourceName, configuration.runtime, configuration.packageType,
+        awsRegion, accountId, tags
+        WHERE resourceType = 'AWS::Lambda::Function'
+
+  # 3) Saved query: how many functions use each runtime (a quick summary).
+  RuntimeCountQuery:
+    Type: AWS::Config::StoredQuery
+    Properties:
+      QueryName: lambda-runtime-count
+      QueryDescription: Number of Lambda functions per runtime
+      # "COUNT(*) ... GROUP BY runtime" = count the functions for each runtime.
+      QueryExpression: >-
+        SELECT configuration.runtime, COUNT(*)
+        WHERE resourceType = 'AWS::Lambda::Function'
+        GROUP BY configuration.runtime
+
+Outputs:
+  RuleName:
+    Description: Name of the Config rule to check compliance
+    Value: !Ref SupportedRuntimeRule

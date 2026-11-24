@@ -1,0 +1,113 @@
+# ---------------------------------------------------------------------------
+# 01-config-recorder.yml — switches on AWS Config so it records every Lambda
+# function in this region (name, runtime, tags...) and keeps the history.
+#
+# SKIP THIS FILE if AWS Config is already turned on in your account/region.
+# (An account can have only ONE recorder per region; a second one fails.)
+# Check with:  aws configservice describe-configuration-recorders
+# If that prints a recorder, go straight to 02-runtime-rules.yml.
+# ---------------------------------------------------------------------------
+
+# Every CloudFormation template starts with this fixed version line.
+AWSTemplateFormatVersion: '2010-09-09'
+# A label shown in the CloudFormation console.
+Description: Runtime governance POC - turn on AWS Config recording for Lambda functions
+
+Resources:
+  # 1) A storage "bucket" (folder in S3) where Config saves its snapshots.
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    # If the stack is deleted, keep the bucket (it may contain history you want).
+    DeletionPolicy: Retain
+    # Same protection if CloudFormation ever needs to replace the bucket.
+    UpdateReplacePolicy: Retain
+    Properties:
+      # Block all public access: these files are private.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # Encrypt files at rest with S3's built-in encryption.
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # 2) Permission for the AWS Config service to write into that bucket.
+  ConfigBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      # Which bucket this policy belongs to (!Ref = "the bucket created above").
+      Bucket: !Ref ConfigBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Config needs to check who owns the bucket and list its permissions.
+          - Sid: AllowConfigCheck
+            Effect: Allow
+            Principal: { Service: config.amazonaws.com }
+            Action: [s3:GetBucketAcl, s3:ListBucket]
+            Resource: !GetAtt ConfigBucket.Arn
+          # Config may write files only into the "AWSLogs/<our account>/" folder.
+          - Sid: AllowConfigWrite
+            Effect: Allow
+            Principal: { Service: config.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub '${ConfigBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*'
+            Condition:
+              StringEquals:
+                # Give the account owner full control of every file Config writes.
+                's3:x-amz-acl': bucket-owner-full-control
+                # Only accept writes on behalf of OUR account.
+                'aws:SourceAccount': !Ref AWS::AccountId
+
+  # 3) An IAM role = an "identity" that AWS Config uses to read our resources.
+  ConfigRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # Who may use ("assume") this role: only the AWS Config service.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: config.amazonaws.com }
+            Action: sts:AssumeRole
+      # AWS's ready-made permission set for Config (read-only access to resources).
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWS_ConfigRole
+
+  # 4) The recorder itself: WHAT to record.
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      Name: default
+      # Use the role from step 3.
+      RoleARN: !GetAtt ConfigRole.Arn
+      RecordingGroup:
+        # Don't record everything (cheaper); record only the types listed below.
+        AllSupported: false
+        IncludeGlobalResourceTypes: false
+        RecordingStrategy:
+          UseOnly: INCLUSION_BY_RESOURCE_TYPES
+        # Only Lambda functions. (Config cannot record Lambda layers.)
+        ResourceTypes:
+          - AWS::Lambda::Function
+
+  # 5) The delivery channel: WHERE to save the recordings (the bucket).
+  #    Creating this also starts the recorder.
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    # Create only after the bucket permission exists, or Config can't write.
+    DependsOn: ConfigBucketPolicy
+    Properties:
+      S3BucketName: !Ref ConfigBucket
+      # Save a full snapshot of recorded resources once a day.
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: TwentyFour_Hours
+
+# Values printed after deployment, so you can find what was created.
+Outputs:
+  ConfigBucketName:
+    Description: S3 bucket where AWS Config stores its snapshots
+    Value: !Ref ConfigBucket

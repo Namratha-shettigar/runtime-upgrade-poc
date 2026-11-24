@@ -1,0 +1,9 @@
+{
+  "name": "sass-layer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lambda layer: node-sass native binary for the Node version in .nvmrc",
+  "dependencies": {
+    "node-sass": "8.0.0"
+  }
+}

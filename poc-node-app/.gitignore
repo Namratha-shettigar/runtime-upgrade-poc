@@ -1,0 +1,4 @@
+# Downloaded packages: never stored in git; they're re-installed from package.json.
+node_modules/
+# Serverless's build output folder.
+.serverless/

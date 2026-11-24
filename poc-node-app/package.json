@@ -11,6 +11,6 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "aws-sdk": "2.1692.0"
+    "aws-sdk": "2.1693.0"
   }
 }

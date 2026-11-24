@@ -32,7 +32,7 @@ jobs:
       python: ${{ steps.pick.outputs.python }}
     steps:
       - name: Get the code (with history, so we can read main's versions)
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -66,7 +66,7 @@ jobs:
         version: ${{ fromJSON(needs.versions.outputs.node) }}
     name: Node tests on nodejs${{ matrix.version }}.x
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the layer and run the tests inside the Lambda image
         run: |
           # docker run = start AWS's official Lambda Node image as a container.
@@ -90,7 +90,7 @@ jobs:
         version: ${{ fromJSON(needs.versions.outputs.python) }}
     name: Python tests on python${{ matrix.version }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the layer and run the tests inside the Lambda image
         run: |
           # Same idea with AWS's official Lambda Python image.
